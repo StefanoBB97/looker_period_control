@@ -478,23 +478,11 @@ parameter: snap_start_date_to {
       {%- endif -%}
       ;;
   }
-  dimension: days_between_last_data_and_current {
-    # The goal here is to get an offset from current date to last data date as a number, and pass that into the date_add function. This is a bit complex, but
-    # it works.
-    hidden: yes
-    sql:
-    {%- if convert_tz._parameter_value == 'true' -%}
-      {%- case '@{database_type}' -%}
-        {%- when "bigquery" %} date_diff(datetime((select max(${origin_event_date}) from ${origin_table_name}), '{{ _query._query_timezone }}'), current_date, DAY)
-        {%- else %} datediff('days', convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', (select max(${origin_event_date}) from ${origin_table_name})), current_date)
-      {%- endcase %}
-    {%- else -%}
-      {%- case '@{database_type}' -%}
-        {%- when "bigquery" %} date_diff(datetime((select max(${origin_event_date}) from ${origin_table_name})), current_date, DAY)
-        {%- else %} datediff('days', (select max(${origin_event_date}) from ${origin_table_name}), current_date)
-      {%- endcase %}
-    {%- endif -%} ;;
-  }
+  dimension: event_date_tz_convert {
+  hidden: yes
+  type: date_raw
+  sql: ${event_date} ;;
+}
   dimension: start_date {
     # The end date used / displayed by the Looker Period Control block is inclusive. This means that while a normal date subtraction operation like date_add('days', -30, '2022-05-31') would
     # result in a date of 2022-05-01, that's not the expected outcome. In reality, the displayed date 2022-05-31 is 2022-05-31 23:59:59. To account for this, the date function is truncated,
