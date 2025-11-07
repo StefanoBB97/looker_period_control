@@ -306,28 +306,11 @@ parameter: snap_start_date_to {
   # Date manipulation fields
   # *************************
   dimension: event_date_tz_convert {
-    ##
-    # Converts the event date to the proper timezone if tz conversion is specified.
-    #
-    # Looker converts any date with time to a string using a TO_CHAR function. This make dealing with any sort of timezone conversion using the
-    # naitive Looker based convert_tz: yes type parameter really difficult to work with and results in needing to re-cast a string date to time.
-    # To avoid this additional complexity, this function handles the conversion of the timezone if specified by the "convert_tz" parameter in
-    # the consuming view.
-    #
-    # Within the consuming view, there is a parameter named "convert_tz". If the date in use is only a date, this must be set to "no". If the date in
-    # use contains a time, then the parameter should be set to yes.
-    hidden: yes
-    type: date_raw
- sql:
-      {%- if convert_tz._parameter_value == 'true' -%}
-        {%- case '@{database_type}' -%}
-          {%- when "bigquery" -%}  datetime(${event_date}, '{{ _query._query_timezone }}')
-          {%- else -%}  convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', ${event_date})
-        {%- endcase -%}
-      {%- else -%}
-        ${event_date}
-      {%- endif -%};;
-  }
+  hidden: yes
+  type: date_raw
+  sql: ${event_date} ;;
+}
+
   dimension: getdate_func {
     ##
     # Returns the value of the current date from Redshift with any timezone conversion added.
