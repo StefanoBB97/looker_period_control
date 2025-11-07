@@ -306,51 +306,22 @@ parameter: snap_start_date_to {
   # Date manipulation fields
   # *************************
   dimension: event_date_tz_convert {
-    ##
-    # Converts the event date to the proper timezone if tz conversion is specified.
-    #
-    # Looker converts any date with time to a string using a TO_CHAR function. This make dealing with any sort of timezone conversion using the
-    # naitive Looker based convert_tz: yes type parameter really difficult to work with and results in needing to re-cast a string date to time.
-    # To avoid this additional complexity, this function handles the conversion of the timezone if specified by the "convert_tz" parameter in
-    # the consuming view.
-    #
-    # Within the consuming view, there is a parameter named "convert_tz". If the date in use is only a date, this must be set to "no". If the date in
-    # use contains a time, then the parameter should be set to yes.
-    hidden: yes
-    type: date_raw
- sql:
-      {%- if convert_tz._parameter_value == 'true' -%}
-        {%- case '@{database_type}' -%}
-          {%- when "bigquery" -%}  datetime(${event_date}, '{{ _query._query_timezone }}')
-          {%- else -%}  convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', ${event_date})
-        {%- endcase -%}
-      {%- else -%}
-        ${event_date}
-      {%- endif -%};;
-  }
-  dimension: getdate_func {
-    ##
-    # Returns the value of the current date from Redshift with any timezone conversion added.
-    #
-    # It's important that the timezone conversion of "current date" only occurs once. This dimension is used by other dimensions to set the
-    # current date. The current_date function from Redshift can't be used here as timezone conversions on a date only data type result in really bad stuff.
-    hidden: yes
-    type: date_raw
-    sql:
-    {%- if _query._query_timezone != '@{database_time_zone}' -%}
-              {%- case '@{database_type}' -%}
-                {%- when "redshift" -%} convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', getdate())
-                {%- when "snowflake" -%} convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', current_timestamp)
-                {%- when "bigquery" %} datetime(current_timestamp(), '{{ _query._query_timezone }}')
-              {%- endcase -%}
-      {%- else -%}
-      {%- case '@{database_type}' -%}
-      {%- when "redshift" -%} getdate()
-      {%- when "snowflake" -%} current_timestamp
-      {%- when "bigquery" %} datetime(current_timestamp())
-      {%- endcase -%}
-      {%- endif -%};;
+  hidden: yes
+  type: date_raw
+  sql: ${event_date} ;;
 }
+
+  dimension: getdate_func {
+  hidden: yes
+  type: date_raw
+  sql:
+    CASE
+      WHEN '@{database_type}' = 'redshift' THEN getdate()
+      WHEN '@{database_type}' = 'snowflake' THEN current_timestamp()
+      WHEN '@{database_type}' = 'bigquery' THEN datetime(current_timestamp())
+    END ;;
+}
+
 
   dimension: end_date_dim_as_of_mod {
     ##
@@ -382,119 +353,93 @@ parameter: snap_start_date_to {
 }
 
   dimension: end_date_dim {
-    ##
-    # Applies any "exclude days" selection to end date value.
-    #
-    # @todo: Will convert_timezone always be needed on the max origin date function?
-    type: date_raw
- hidden: yes
-    sql:{%- if period_selection._parameter_value == 'lw' or period_selection._parameter_value == 'lm'
-               or period_selection._parameter_value == 'lq' or period_selection._parameter_value == 'ly' -%}
-            {%- case period_selection._parameter_value -%}
-                {%- when 'lw' -%}
-                    {%- case '@{database_type}' -%}
-                      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, WEEK), interval -1 second)
-                      {%- else %} dateadd('seconds', -1, date_trunc('week', ${end_date_dim_as_of_mod}))
-                    {%- endcase %}
-                {%- when 'lm' -%}
-                    {%- case '@{database_type}' -%}
-                      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, MONTH), interval -1 second)
-                      {%- else -%} dateadd('seconds', -1, date_trunc('month', ${end_date_dim_as_of_mod}))
-                    {%- endcase %}
-                {%- when 'lq' -%}
-                    {%- case '@{database_type}' -%}
-                      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, QUARTER), interval -1 second)
-                      {%- else -%} dateadd('seconds', -1, date_trunc('quarter', ${end_date_dim_as_of_mod}))
-                    {%- endcase %}
-                {%- when 'ly' -%}
-                    {%- case '@{database_type}' -%}
-                      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, YEAR), interval -1 second)
-                      {%- else -%} dateadd('seconds', -1, date_trunc('year', ${end_date_dim_as_of_mod}))
-                    {%- endcase %}
-            {%- endcase %}
-        {%- else -%}
-          {%- if as_of_date._parameter_value == 'NULL' and exclude_days._parameter_value != '0' -%}
-            {%- case exclude_days._parameter_value -%}
-             {%- when "last_data_future" -%}
-                {%- if convert_tz._parameter_value == 'true' -%}
-                    {%- case '@{database_type}' -%}
-                      {%- when "bigquery" %} datetime(date_add(date_trunc(datetime((select max(${origin_event_date}) from ${origin_table_name})), DAY), interval 86399 second), '{{ _query._query_timezone }}')
-                      {%- else -%} convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', dateadd('seconds', 86399, date((select max(${origin_event_date}) from ${origin_table_name}))))
-                    {%- endcase %}
-                {%- else -%}
-                {%- case '@{database_type}' -%}
-                  {%- when "bigquery" -%}  datetime(date_add(date_trunc(datetime((select max(${origin_event_date}) from ${origin_table_name})), DAY), interval 86399 SECOND))
-                  {%- else -%}  dateadd('seconds', 86399, date((select max(${origin_event_date}) from ${origin_table_name})))
-                {%- endcase -%}
-      {%- endif -%}
-      {%- when "last_data_max_today" -%}
-      {%- if convert_tz._parameter_value == 'true' -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} datetime(date_add(date_trunc(least(${getdate_func},datetime((select max(${origin_event_date}) from ${origin_table_name}))), DAY), interval 86399 second), '{{ _query._query_timezone }}')
-      {%- else -%} convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', dateadd('seconds', 86399, date(least(${getdate_func},(select max(${origin_event_date}) from ${origin_table_name})))))
-      {%- endcase %}
-      {%- else -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} datetime(date_add(date_trunc(least(${getdate_func},datetime((select max(${origin_event_date}) from ${origin_table_name}))), DAY), interval 86399 second))
-      {%- else -%} dateadd('seconds', 86399, date(least(${getdate_func},(select max(${origin_event_date}) from ${origin_table_name}))))
-      {%- endcase %}
-      {%- endif -%}
-      {%- when "1" -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, DAY), interval -1 SECOND)
-      {%- else %} dateadd('seconds', -1, date(${end_date_dim_as_of_mod}))
-      {%- endcase %}
-      {%- when "2" -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, DAY), interval -86401 SECOND)
-      {%- else %} dateadd('seconds', -86401, date(${end_date_dim_as_of_mod}))
-      {%- endcase %}
-      {%- when "last_full_week" -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, WEEK), interval -1 SECOND)
-      {%- else %} dateadd('seconds', -1, date_trunc('week', ${end_date_dim_as_of_mod}))
-      {%- endcase %}
-      {%- when "last_full_month" -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, MONTH), interval -1 SECOND)
-      {%- else %} dateadd('seconds', -1, date_trunc('month', ${end_date_dim_as_of_mod}))
-      {%- endcase %}
-      {%- when "last_full_quarter" -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod},QUARTER), interval -1 SECOND)
-      {%- else %} dateadd('seconds', -1, date_trunc('quarter', ${end_date_dim_as_of_mod}))
-      {%- endcase %}
-      {%- when "last_full_year" -%}
-      {%- case '@{database_type}' -%}
-      {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod},YEAR), interval -1 SECOND)
-      {%- else %} dateadd('seconds', -1, date_trunc('year', ${end_date_dim_as_of_mod}))
-      {%- endcase %}
-      {%- else -%}
-      ${end_date_dim_as_of_mod}
-      {%- endcase %}
-      {%- else -%}
-      ${end_date_dim_as_of_mod}
-      {%- endif -%}
-      {%- endif -%}
-      ;;
-  }
-  dimension: days_between_last_data_and_current {
-    # The goal here is to get an offset from current date to last data date as a number, and pass that into the date_add function. This is a bit complex, but
-    # it works.
-    hidden: yes
-    sql:
-    {%- if convert_tz._parameter_value == 'true' -%}
-      {%- case '@{database_type}' -%}
-        {%- when "bigquery" %} date_diff(datetime((select max(${origin_event_date}) from ${origin_table_name}), '{{ _query._query_timezone }}'), current_date, DAY)
-        {%- else %} datediff('days', convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', (select max(${origin_event_date}) from ${origin_table_name})), current_date)
+  ##
+  # Applies any "exclude days" selection to end date value.
+  #
+  type: date_raw
+  hidden: yes
+  sql:
+    {%- if period_selection._parameter_value in ['lw', 'lm', 'lq', 'ly'] -%}
+      {%- case period_selection._parameter_value -%}
+        {%- when 'lw' -%}
+          {%- case '@{database_type}' -%}
+            {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, WEEK), interval -1 second)
+            {%- else %} dateadd('seconds', -1, date_trunc('week', ${end_date_dim_as_of_mod}))
+          {%- endcase %}
+        {%- when 'lm' -%}
+          {%- case '@{database_type}' -%}
+            {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, MONTH), interval -1 second)
+            {%- else -%} dateadd('seconds', -1, date_trunc('month', ${end_date_dim_as_of_mod}))
+          {%- endcase %}
+        {%- when 'lq' -%}
+          {%- case '@{database_type}' -%}
+            {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, QUARTER), interval -1 second)
+            {%- else -%} dateadd('seconds', -1, date_trunc('quarter', ${end_date_dim_as_of_mod}))
+          {%- endcase %}
+        {%- when 'ly' -%}
+          {%- case '@{database_type}' -%}
+            {%- when "bigquery" %} date_add(date_trunc(${end_date_dim_as_of_mod}, YEAR), interval -1 second)
+            {%- else -%} dateadd('seconds', -1, date_trunc('year', ${end_date_dim_as_of_mod}))
+          {%- endcase %}
       {%- endcase %}
     {%- else -%}
-      {%- case '@{database_type}' -%}
-        {%- when "bigquery" %} date_diff(datetime((select max(${origin_event_date}) from ${origin_table_name})), current_date, DAY)
-        {%- else %} datediff('days', (select max(${origin_event_date}) from ${origin_table_name}), current_date)
-      {%- endcase %}
-    {%- endif -%} ;;
-  }
+      {%- if as_of_date._parameter_value == 'NULL' and exclude_days._parameter_value != '0' -%}
+        {%- case exclude_days._parameter_value -%}
+          {%- when "last_data_future" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} datetime(date_add(date_trunc(datetime((select max(${origin_event_date}) from ${origin_table_name})), DAY), interval 86399 second))
+              {%- else -%} dateadd('seconds', 86399, date((select max(${origin_event_date}) from ${origin_table_name})))
+            {%- endcase %}
+          {%- when "last_data_max_today" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} datetime(date_add(date_trunc(least(${getdate_func}, datetime((select max(${origin_event_date}) from ${origin_table_name}))), DAY), interval 86399 second))
+              {%- else -%} dateadd('seconds', 86399, date(least(${getdate_func}, (select max(${origin_event_date}) from ${origin_table_name}))))
+            {%- endcase %}
+          {%- when "1" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} date_add(date_trunc(${end_date_dim_as_of_mod}, DAY), interval -1 SECOND)
+              {%- else %} dateadd('seconds', -1, date(${end_date_dim_as_of_mod}))
+            {%- endcase %}
+          {%- when "2" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} date_add(date_trunc(${end_date_dim_as_of_mod}, DAY), interval -86401 SECOND)
+              {%- else %} dateadd('seconds', -86401, date(${end_date_dim_as_of_mod}))
+            {%- endcase %}
+          {%- when "last_full_week" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} date_add(date_trunc(${end_date_dim_as_of_mod}, WEEK), interval -1 SECOND)
+              {%- else %} dateadd('seconds', -1, date_trunc('week', ${end_date_dim_as_of_mod}))
+            {%- endcase %}
+          {%- when "last_full_month" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} date_add(date_trunc(${end_date_dim_as_of_mod}, MONTH), interval -1 SECOND)
+              {%- else %} dateadd('seconds', -1, date_trunc('month', ${end_date_dim_as_of_mod}))
+            {%- endcase %}
+          {%- when "last_full_quarter" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} date_add(date_trunc(${end_date_dim_as_of_mod}, QUARTER), interval -1 SECOND)
+              {%- else %} dateadd('seconds', -1, date_trunc('quarter', ${end_date_dim_as_of_mod}))
+            {%- endcase %}
+          {%- when "last_full_year" -%}
+            {%- case '@{database_type}' -%}
+              {%- when "bigquery" -%} date_add(date_trunc(${end_date_dim_as_of_mod}, YEAR), interval -1 SECOND)
+              {%- else %} dateadd('seconds', -1, date_trunc('year', ${end_date_dim_as_of_mod}))
+            {%- endcase %}
+          {%- else -%}
+            ${end_date_dim_as_of_mod}
+        {%- endcase %}
+      {%- else -%}
+        ${end_date_dim_as_of_mod}
+      {%- endif -%}
+    {%- endif -%}
+  ;;
+}
+
+  dimension: event_date_tz_convert {
+  hidden: yes
+  type: date_raw
+  sql: ${event_date} ;;
+}
   dimension: start_date {
     # The end date used / displayed by the Looker Period Control block is inclusive. This means that while a normal date subtraction operation like date_add('days', -30, '2022-05-31') would
     # result in a date of 2022-05-01, that's not the expected outcome. In reality, the displayed date 2022-05-31 is 2022-05-31 23:59:59. To account for this, the date function is truncated,
