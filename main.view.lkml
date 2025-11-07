@@ -312,28 +312,16 @@ parameter: snap_start_date_to {
 }
 
   dimension: getdate_func {
-    ##
-    # Returns the value of the current date from Redshift with any timezone conversion added.
-    #
-    # It's important that the timezone conversion of "current date" only occurs once. This dimension is used by other dimensions to set the
-    # current date. The current_date function from Redshift can't be used here as timezone conversions on a date only data type result in really bad stuff.
-    hidden: yes
-    type: date_raw
-    sql:
-    {%- if _query._query_timezone != '@{database_time_zone}' -%}
-              {%- case '@{database_type}' -%}
-                {%- when "redshift" -%} convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', getdate())
-                {%- when "snowflake" -%} convert_timezone('@{database_time_zone}', '{{ _query._query_timezone }}', current_timestamp)
-                {%- when "bigquery" %} datetime(current_timestamp(), '{{ _query._query_timezone }}')
-              {%- endcase -%}
-      {%- else -%}
-      {%- case '@{database_type}' -%}
-      {%- when "redshift" -%} getdate()
-      {%- when "snowflake" -%} current_timestamp
-      {%- when "bigquery" %} datetime(current_timestamp())
-      {%- endcase -%}
-      {%- endif -%};;
+  hidden: yes
+  type: date_raw
+  sql:
+    CASE
+      WHEN '@{database_type}' = 'redshift' THEN getdate()
+      WHEN '@{database_type}' = 'snowflake' THEN current_timestamp()
+      WHEN '@{database_type}' = 'bigquery' THEN datetime(current_timestamp())
+    END ;;
 }
+
 
   dimension: end_date_dim_as_of_mod {
     ##
